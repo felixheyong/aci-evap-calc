@@ -260,17 +260,34 @@
 
     <!-- Location + Weather -->
     <div style="margin-top:12px;background:#e8f4fd;border-radius:8px;padding:12px 14px;" id="weather-box">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="font-size:1.2rem;">📍</span>
-          <span id="location-label" style="font-size:0.8rem;font-weight:600;color:var(--primary);">点击右侧按钮获取本地天气...</span>
+          <span id="location-label" style="font-size:0.8rem;font-weight:600;color:var(--primary);">点击获取按钮自动定位...</span>
         </div>
-        <button onclick="fetchLocalWeather()" id="btn-weather"
-          style="padding:7px 14px;border:none;border-radius:6px;background:var(--primary);color:#fff;font-size:0.75rem;cursor:pointer;font-weight:600;white-space:nowrap;">
-          🌐 获取本地天气
+        <div style="display:flex;gap:6px;">
+          <button onclick="fetchLocationByIP()" id="btn-ip"
+            style="padding:7px 12px;border:none;border-radius:6px;background:var(--primary);color:#fff;font-size:0.73rem;cursor:pointer;font-weight:600;white-space:nowrap;">
+            🌐 IP 定位
+          </button>
+          <button onclick="fetchLocationByBrowser()" id="btn-gps"
+            style="padding:7px 12px;border:1px solid var(--primary);border-radius:6px;background:#fff;color:var(--primary);font-size:0.73rem;cursor:pointer;font-weight:600;white-space:nowrap;">
+            📡 GPS 定位
+          </button>
+        </div>
+      </div>
+      <!-- Manual city search -->
+      <div style="display:flex;gap:6px;margin-top:8px;">
+        <input type="text" id="city-search" placeholder="🔍 或输入城市名 (如: 重庆、Shanghai、Dubai...)"
+          style="flex:1;padding:6px 10px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;"
+          onkeydown="if(event.key==='Enter')fetchLocationByCity()">
+        <button onclick="fetchLocationByCity()"
+          style="padding:6px 12px;border:none;border-radius:4px;background:var(--accent);color:#fff;font-size:0.73rem;cursor:pointer;font-weight:600;white-space:nowrap;">
+          搜索
         </button>
       </div>
-      <div id="weather-detail" style="font-size:0.72rem;color:var(--text-light);margin-top:4px;display:none;"></div>
+      <div id="weather-detail" style="font-size:0.72rem;color:var(--text-light);margin-top:6px;display:none;"></div>
+      <div id="location-method" style="font-size:0.65rem;color:#999;margin-top:2px;display:none;"></div>
     </div>
 
     <!-- Presets -->
@@ -950,94 +967,162 @@ function setPreset(name) {
   updateVal('v-m');
 }
 
-// ── WEATHER FETCH ──
-async function fetchLocalWeather() {
-  const btn = document.getElementById('btn-weather');
+// ── LOCATION & WEATHER FETCH (Multi-method) ──
+let currentLocationSource = null; // 'ip' | 'gps' | 'city'
+
+async function applyWeatherData(lat, lon, source, sourceDetail) {
+  const btn = document.getElementById('btn-ip');
   const label = document.getElementById('location-label');
   const detail = document.getElementById('weather-detail');
+  const method = document.getElementById('location-method');
+  currentLocationSource = source;
 
-  btn.textContent = '⏳ 定位中...';
+  btn.textContent = '⏳ 获取天气...';
   btn.disabled = true;
-
-  // Step 1: Geolocation
-  const getPosition = () => new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error('浏览器不支持定位'));
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: false,
-      timeout: 10000,
-      maximumAge: 300000
-    });
-  });
+  document.getElementById('btn-gps').disabled = true;
 
   try {
-    const pos = await getPosition();
-    const lat = pos.coords.latitude.toFixed(4);
-    const lon = pos.coords.longitude.toFixed(4);
-
-    btn.textContent = '⏳ 获取天气...';
-
-    // Step 2: Open-Meteo API (free, no key required)
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m&timezone=auto`;
     const resp = await fetch(url);
+    if (!resp.ok) throw new Error('Weather API error');
     const data = await resp.json();
-
     const current = data.current;
+
     const airTemp = Math.round(current.temperature_2m);
     const rh = Math.round(current.relative_humidity_2m);
     const windKph = Math.round(current.wind_speed_10m);
     const gustKph = current.wind_gusts_10m ? Math.round(current.wind_gusts_10m) : windKph;
-
-    // Concrete temp ≈ air temp + 3°C (solar heating) or + 5~8°C if sunny
     const concreteTemp = airTemp + 3;
+    const tz = data.timezone || 'Unknown';
 
-    // Set values
+    // Set slider values
     setUnits('metric');
     document.getElementById('ta-m').value = airTemp;
     document.getElementById('tc-m').value = concreteTemp;
     document.getElementById('rh-m').value = rh;
     document.getElementById('v-m').value = Math.max(windKph, 1);
-    updateVal('ta-m');
-    updateVal('tc-m');
-    updateVal('rh-m');
-    updateVal('v-m');
+    updateVal('ta-m'); updateVal('tc-m'); updateVal('rh-m'); updateVal('v-m');
 
     // Update UI
-    const timezone = data.timezone || 'Local';
-    label.innerHTML = `📍 ${data.timezone || '当前位置'} (${lat}, ${lon})`;
+    const sourceEmoji = source === 'ip' ? '🌐' : source === 'gps' ? '📡' : '🔍';
+    label.innerHTML = `${sourceEmoji} ${sourceDetail} (${lat}, ${lon}) · ${tz}`;
     detail.style.display = 'block';
     detail.innerHTML = `
-      🌡️ 气温 ${airTemp}°C &nbsp;|&nbsp; 💧 RH ${rh}% &nbsp;|&nbsp; 💨 风速 ${windKph} kph (阵风 ${gustKph} kph) &nbsp;|&nbsp; 🕐 ${current.time || ''}
-      <br><span style="opacity:0.7;">混凝土温度估算 ≈ 气温 + 3°C = ${concreteTemp}°C（日照加热）</span>
+      🌡️ 气温 <b>${airTemp}°C</b> &nbsp;|&nbsp; 💧 RH <b>${rh}%</b> &nbsp;|&nbsp; 💨 风速 <b>${windKph} kph</b> (阵风 ${gustKph} kph)
+      <br><span style="opacity:0.7;">🔥 混凝土温度估算 = 气温 + 3°C = <b>${concreteTemp}°C</b>（日照加热修正）</span>
     `;
+    method.style.display = 'block';
+    const methodNames = { ip: 'IP 地址定位 (ipapi.co)', gps: '浏览器 GPS/WiFi 定位', city: '城市名称搜索 (Open-Meteo Geocoding)' };
+    method.textContent = `定位方式: ${methodNames[source]} | 坐标: ${lat}, ${lon}`;
 
-    btn.textContent = '🔄 刷新天气';
+    btn.textContent = '🔄 刷新';
     btn.disabled = false;
-
+    document.getElementById('btn-gps').disabled = false;
     renderResults();
-
   } catch (err) {
-    console.warn('Weather fetch failed:', err);
-    label.textContent = '⚠️ 无法获取位置/天气，请手动输入或使用预设';
+    console.warn('Weather fetch error:', err);
+    label.textContent = '⚠️ 天气数据获取失败，请检查网络后重试';
     detail.style.display = 'block';
-    detail.textContent = '请允许浏览器定位权限，或手动调整上方滑块。HTTPS 环境下定位更稳定。';
+    detail.textContent = 'Open-Meteo API 可能暂时不可用，请手动输入参数或使用预设场景。';
     btn.textContent = '🔁 重试';
     btn.disabled = false;
+    document.getElementById('btn-gps').disabled = false;
   }
 }
 
-// Auto-fetch on load (if HTTPS or localhost)
-window.addEventListener('load', () => {
-  // Try auto-locate after a short delay
-  setTimeout(() => {
-    const proto = window.location.protocol;
-    // Geolocation works on localhost and HTTPS
-    if (proto === 'https:' || proto === 'file:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      fetchLocalWeather();
+// Method 1: IP-based geolocation (most reliable for desktop)
+async function fetchLocationByIP() {
+  const label = document.getElementById('location-label');
+  const btn = document.getElementById('btn-ip');
+  label.textContent = '⏳ 正在通过 IP 定位...';
+  btn.textContent = '⏳ ...';
+  btn.disabled = true;
+
+  try {
+    // ipapi.co — free HTTPS, 1000 req/day, no key
+    const resp = await fetch('https://ipapi.co/json/');
+    if (!resp.ok) throw new Error('IP API failed');
+    const ipData = await resp.json();
+    if (ipData.error) throw new Error(ipData.reason || 'IP lookup failed');
+
+    const cityName = ipData.city || ipData.region || 'Unknown';
+    const country = ipData.country_name || '';
+    const sourceDetail = `${cityName}, ${country}`;
+    await applyWeatherData(ipData.latitude, ipData.longitude, 'ip', sourceDetail);
+  } catch (err) {
+    console.warn('IP geolocation failed:', err);
+    label.textContent = '⚠️ IP 定位失败，请尝试 GPS 定位或手动搜索城市';
+    btn.textContent = '🔁 重试';
+    btn.disabled = false;
+    document.getElementById('weather-detail').style.display = 'block';
+    document.getElementById('weather-detail').textContent = 'IP 定位服务不可用 (ipapi.co)，请使用下方城市搜索。';
+  }
+}
+
+// Method 2: Browser Geolocation (GPS/WiFi — better on mobile)
+function fetchLocationByBrowser() {
+  const label = document.getElementById('location-label');
+  const btn = document.getElementById('btn-gps');
+  label.textContent = '⏳ 正在获取 GPS/WiFi 位置...';
+  btn.textContent = '⏳ ...';
+  btn.disabled = true;
+
+  if (!navigator.geolocation) {
+    label.textContent = '⚠️ 浏览器不支持 GPS 定位，请使用 IP 定位或手动搜索';
+    btn.textContent = '📡 不可用';
+    btn.disabled = true;
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const lat = pos.coords.latitude.toFixed(4);
+      const lon = pos.coords.longitude.toFixed(4);
+      const acc = pos.coords.accuracy ? Math.round(pos.coords.accuracy) : '?';
+      await applyWeatherData(lat, lon, 'gps', `GPS 精度≈${acc}m`);
+    },
+    async (err) => {
+      console.warn('Browser geolocation failed:', err.message);
+      label.textContent = '⚠️ GPS 定位失败/被拒绝，自动切换 IP 定位...';
+      btn.textContent = '📡 已拒绝';
+      btn.disabled = false;
+      // Auto fallback to IP
+      await fetchLocationByIP();
+    },
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 600000 }
+  );
+}
+
+// Method 3: Manual city name search via Open-Meteo Geocoding
+async function fetchLocationByCity() {
+  const input = document.getElementById('city-search');
+  const city = input.value.trim();
+  if (!city) { input.placeholder = '请输入城市名!'; return; }
+
+  const label = document.getElementById('location-label');
+  label.textContent = `⏳ 正在搜索 "${city}"...`;
+
+  try {
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=3&language=zh&format=json`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('Geocoding failed');
+    const geoData = await resp.json();
+    if (!geoData.results || geoData.results.length === 0) {
+      label.textContent = `⚠️ 未找到 "${city}"，请尝试更具体的名称（如"重庆 渝中"）`;
+      return;
     }
-  }, 500);
+    const best = geoData.results[0];
+    const detail = `${best.name}${best.admin1 ? ', '+best.admin1 : ''}, ${best.country || ''}`;
+    await applyWeatherData(best.latitude, best.longitude, 'city', detail);
+  } catch (err) {
+    console.warn('City search failed:', err);
+    label.textContent = '⚠️ 城市搜索失败，请检查网络';
+  }
+}
+
+// Auto-locate on page load — prefer IP (most reliable for desktop)
+window.addEventListener('load', () => {
+  setTimeout(() => { fetchLocationByIP(); }, 600);
 });
 
 // ── Add input listeners ──
