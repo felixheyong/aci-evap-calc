@@ -234,6 +234,21 @@
         <input type="range" id="v-m" min="0" max="80" value="20" step="0.5" oninput="updateVal('v-m')">
         <span class="val" id="val-v-m">20 kph</span>
       </div>
+      <!-- Wind mode toggle -->
+      <div style="display:flex;align-items:center;gap:10px;margin-top:8px;padding:8px 12px;background:#f8f9fa;border-radius:6px;">
+        <span style="font-size:0.78rem;font-weight:600;color:var(--text-light);">🌬️ 风速模式</span>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:0.78rem;">
+          <input type="radio" name="wind-mode" value="indoor" onchange="setWindMode('indoor')">
+          🏠 室内 (V=0)
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:0.78rem;">
+          <input type="radio" name="wind-mode" value="outdoor" onchange="setWindMode('outdoor')" checked>
+          ☀️ 露天 (天气风速)
+        </label>
+      </div>
+      <div id="wind-note" style="font-size:0.65rem;color:#e67e22;margin-top:3px;display:none;">
+        ⚠️ 户外风速需在距离地坪板面 <b>50cm 高度</b> 处实测为准
+      </div>
     </div>
 
     <div id="inputs-imperial" style="display:none;">
@@ -256,6 +271,17 @@
         <label>💨 风速 V</label>
         <input type="range" id="v-i" min="0" max="50" value="12" step="0.5" oninput="updateVal('v-i')">
         <span class="val" id="val-v-i">12 mph</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:8px;padding:8px 12px;background:#f8f9fa;border-radius:6px;">
+        <span style="font-size:0.78rem;font-weight:600;color:var(--text-light);">🌬️ Wind Mode</span>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:0.78rem;">
+          <input type="radio" name="wind-mode-i" value="indoor" onchange="setWindMode('indoor')">
+          🏠 Indoor (V=0)
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:0.78rem;">
+          <input type="radio" name="wind-mode-i" value="outdoor" onchange="setWindMode('outdoor')" checked>
+          ☀️ Outdoor (weather)
+        </label>
       </div>
     </div>
 
@@ -931,6 +957,47 @@ function setUnits(units) {
   renderResults();
 }
 
+// ── WIND MODE ──
+let windMode = 'outdoor';
+let savedWindKph = 20;
+let savedWindMph = 12;
+
+function setWindMode(mode) {
+  windMode = mode;
+  // Sync radio buttons in both unit sections
+  document.querySelectorAll('input[name="wind-mode"][value="' + mode + '"]').forEach(r => r.checked = true);
+  document.querySelectorAll('input[name="wind-mode-i"][value="' + mode + '"]').forEach(r => r.checked = true);
+
+  const vM = document.getElementById('v-m');
+  const vI = document.getElementById('v-i');
+  const note = document.getElementById('wind-note');
+
+  if (mode === 'indoor') {
+    // Save current outdoor wind speed before zeroing
+    if (vM.value != 0) savedWindKph = parseFloat(vM.value);
+    if (vI.value != 0) savedWindMph = parseFloat(vI.value);
+    vM.value = 0;
+    vI.value = 0;
+    vM.disabled = true;
+    vI.disabled = true;
+    note.style.display = 'none';
+    document.getElementById('val-v-m').textContent = '0 kph 🏠';
+    document.getElementById('val-v-i').textContent = '0 mph 🏠';
+  } else {
+    vM.value = savedWindKph;
+    vI.value = savedWindMph;
+    vM.disabled = false;
+    vI.disabled = false;
+    note.style.display = 'block';
+    document.getElementById('val-v-m').textContent = savedWindKph + ' kph';
+    document.getElementById('val-v-i').textContent = savedWindMph + ' mph';
+  }
+  renderResults();
+}
+
+// Override weather fetch to respect indoor mode
+const originalApplyWeatherData = null; // placeholder for hook
+
 // ── UPDATE LABEL ──
 function updateVal(id) {
   const el = document.getElementById(id);
@@ -1001,15 +1068,28 @@ async function applyWeatherData(lat, lon, source, sourceDetail) {
     document.getElementById('ta-m').value = airTemp;
     document.getElementById('tc-m').value = concreteTemp;
     document.getElementById('rh-m').value = rh;
-    document.getElementById('v-m').value = Math.max(windKph, 1);
+    // Respect indoor/outdoor wind mode
+    if (windMode === 'outdoor') {
+      savedWindKph = Math.max(windKph, 1);
+      savedWindMph = Math.round(savedWindKph / 1.609);
+      document.getElementById('v-m').value = savedWindKph;
+      document.getElementById('v-i').value = savedWindMph;
+      document.getElementById('v-m').disabled = false;
+      document.getElementById('v-i').disabled = false;
+      document.getElementById('wind-note').style.display = 'block';
+    } else {
+      document.getElementById('v-m').value = 0;
+      document.getElementById('v-i').value = 0;
+    }
     updateVal('ta-m'); updateVal('tc-m'); updateVal('rh-m'); updateVal('v-m');
 
     // Update UI
     const sourceEmoji = source === 'ip' ? '🌐' : source === 'gps' ? '📡' : '🔍';
+    const windLabel = windMode === 'indoor' ? '室内 (V=0)' : `${windKph} kph (阵风 ${gustKph} kph)`;
     label.innerHTML = `${sourceEmoji} ${sourceDetail} (${lat}, ${lon}) · ${tz}`;
     detail.style.display = 'block';
     detail.innerHTML = `
-      🌡️ 气温 <b>${airTemp}°C</b> &nbsp;|&nbsp; 💧 RH <b>${rh}%</b> &nbsp;|&nbsp; 💨 风速 <b>${windKph} kph</b> (阵风 ${gustKph} kph)
+      🌡️ 气温 <b>${airTemp}°C</b> &nbsp;|&nbsp; 💧 RH <b>${rh}%</b> &nbsp;|&nbsp; 💨 风速 <b>${windLabel}</b>
       <br><span style="opacity:0.7;">🔥 混凝土温度估算 = 气温 + 3°C = <b>${concreteTemp}°C</b>（日照加热修正）</span>
     `;
     method.style.display = 'block';
