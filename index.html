@@ -46,6 +46,7 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 20px;
+    align-items: start;
   }
   @media (max-width: 800px) { .container { grid-template-columns: 1fr; } }
 
@@ -319,17 +320,25 @@
       <div style="text-align:center;color:#aaa;padding:40px;">调整参数后自动计算...</div>
     </div>
   </div>
+
+  <!-- Mitigation (moved to left for balance) -->
+  <div class="card" id="mitigation-card">
+    <h2><span class="icon">🛡️</span>缓解措施 (ACI 305R §3.2)</h2>
+    <div id="mitigation-content">
+      <div style="color:#aaa;font-size:0.82rem;">蒸发量评估后方可推荐措施...</div>
+    </div>
+  </div>
 </div>
 
 <!-- ════════════ RIGHT: NOMOGRAPH + DETAILS ════════════ -->
 <div>
   <!-- Nomograph -->
-  <div class="card">
+  <div class="card" style="padding-bottom:12px;">
     <h2><span class="icon">📐</span>ACI 蒸发诺模图 (交互式)</h2>
-    <div id="nomograph-wrap">
+    <div id="nomograph-wrap" style="max-height:340px;">
       <canvas id="nomo-canvas"></canvas>
     </div>
-    <div style="font-size:0.7rem;color:var(--text-light);text-align:center;margin-top:4px;">
+    <div style="font-size:0.7rem;color:var(--text-light);text-align:center;margin-top:2px;">
       蓝线 = 当前参数的四步求解路径 | 基于 Menzel (1954) + ACI 305R Fig. 2.1.5
     </div>
   </div>
@@ -347,14 +356,6 @@
         <tr id="row-uno-simple"><td>3. Uno 简化经验公式</td><td id="td-uno-simple">--</td><td>Uno, ACI Mat. J. 1998</td><td>直接回归</td></tr>
       </tbody>
     </table>
-  </div>
-
-  <!-- Mitigation -->
-  <div class="card" id="mitigation-card">
-    <h2><span class="icon">🛡️</span>缓解措施 (ACI 305R §3.2)</h2>
-    <div id="mitigation-content">
-      <div style="color:#aaa;font-size:0.82rem;">蒸发量评估后方可推荐措施...</div>
-    </div>
   </div>
 
   <!-- Threshold Reference -->
