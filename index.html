@@ -123,6 +123,10 @@
     position: relative; width: 200px; height: 100px; margin: 12px auto; overflow: hidden;
   }
   .gauge-wrap canvas { width: 100%; height: 100%; }
+  .gauge-value {
+    text-align: center; font-size: 1.1rem; font-weight: 700; color: var(--primary);
+    margin-top: 2px; padding: 4px 0;
+  }
 
   /* ── Multi-Method Table ── */
   .methods-table { width: 100%; font-size: 0.8rem; border-collapse: collapse; margin-top: 8px; }
@@ -652,6 +656,7 @@ function renderResults() {
     <div class="gauge-wrap">
       <canvas id="gauge-canvas"></canvas>
     </div>
+	    <div class="gauge-value">${displayVal.toFixed(2)} ${unit}</div>
   `;
 
   // Methods table
@@ -755,10 +760,6 @@ function drawGauge(value, unit, risk) {
   ctx.arc(cx, cy, 8, 0, Math.PI*2);
   ctx.fill();
 
-  // Value label
-  ctx.fillStyle = '#2c3e50';
-  ctx.font = 'bold 20px Segoe UI';
-  ctx.fillText(value.toFixed(2) + ' ' + unit, cx, cy - 80);
 }
 
 // ── DRAW NOMOGRAPH ──
@@ -1094,7 +1095,7 @@ async function applyWeatherData(lat, lon, source, sourceDetail) {
       <br><span style="opacity:0.7;">🔥 混凝土温度估算 = 气温 + 3°C = <b>${concreteTemp}°C</b>（日照加热修正）</span>
     `;
     method.style.display = 'block';
-    const methodNames = { ip: 'IP 地址定位 (ipapi.co)', gps: '浏览器 GPS/WiFi 定位', city: '城市名称搜索 (Open-Meteo Geocoding)' };
+    const methodNames = { ip: 'IP 地址定位', gps: '浏览器 GPS/WiFi 定位', city: '城市名称搜索 (Open-Meteo Geocoding)' };
     method.textContent = `定位方式: ${methodNames[source]} | 坐标: ${lat}, ${lon}`;
 
     btn.textContent = '🔄 刷新';
@@ -1112,7 +1113,33 @@ async function applyWeatherData(lat, lon, source, sourceDetail) {
   }
 }
 
-// Method 1: IP-based geolocation (most reliable for desktop)
+// IP Geolocation — try multiple services for resilience (especially behind firewalls)
+async function tryIPService(url, parseFn, label) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(label + ' HTTP ' + resp.status);
+  const data = await resp.json();
+  return parseFn(data);
+}
+
+const IP_SERVICES = [
+  {
+    name: 'ip-api.com',
+    url: 'http://ip-api.com/json/',
+    parse: (d) => {
+      if (d.status !== 'success') throw new Error(d.message || 'ip-api error');
+      return { lat: d.lat, lon: d.lon, city: d.city || d.regionName, country: d.country || '' };
+    }
+  },
+  {
+    name: 'ipapi.co',
+    url: 'https://ipapi.co/json/',
+    parse: (d) => {
+      if (d.error) throw new Error(d.reason || 'ipapi error');
+      return { lat: d.latitude, lon: d.longitude, city: d.city || d.region, country: d.country_name || '' };
+    }
+  }
+];
+
 async function fetchLocationByIP() {
   const label = document.getElementById('location-label');
   const btn = document.getElementById('btn-ip');
@@ -1120,25 +1147,29 @@ async function fetchLocationByIP() {
   btn.textContent = '⏳ ...';
   btn.disabled = true;
 
-  try {
-    // ipapi.co — free HTTPS, 1000 req/day, no key
-    const resp = await fetch('https://ipapi.co/json/');
-    if (!resp.ok) throw new Error('IP API failed');
-    const ipData = await resp.json();
-    if (ipData.error) throw new Error(ipData.reason || 'IP lookup failed');
-
-    const cityName = ipData.city || ipData.region || 'Unknown';
-    const country = ipData.country_name || '';
-    const sourceDetail = `${cityName}, ${country}`;
-    await applyWeatherData(ipData.latitude, ipData.longitude, 'ip', sourceDetail);
-  } catch (err) {
-    console.warn('IP geolocation failed:', err);
-    label.textContent = '⚠️ IP 定位失败，请尝试 GPS 定位或手动搜索城市';
-    btn.textContent = '🔁 重试';
-    btn.disabled = false;
-    document.getElementById('weather-detail').style.display = 'block';
-    document.getElementById('weather-detail').textContent = 'IP 定位服务不可用 (ipapi.co)，请使用下方城市搜索。';
+  let lastErr = null;
+  for (const svc of IP_SERVICES) {
+    try {
+      label.textContent = `⏳ 尝试 ${svc.name} 定位...`;
+      const result = await tryIPService(svc.url, svc.parse, svc.name);
+      const sourceDetail = `${result.city}, ${result.country}`;
+      label.textContent = `✅ ${svc.name} 定位成功`;
+      await applyWeatherData(result.lat, result.lon, 'ip', sourceDetail);
+      return; // success — stop trying more services
+    } catch (err) {
+      console.warn(`IP service ${svc.name} failed:`, err.message);
+      lastErr = err;
+      // continue to next service
+    }
   }
+
+  // All services failed
+  console.warn('All IP geolocation services failed');
+  label.textContent = '⚠️ 所有 IP 定位服务均失败，请尝试 GPS 定位或手动搜索城市';
+  btn.textContent = '🔁 重试';
+  btn.disabled = false;
+  document.getElementById('weather-detail').style.display = 'block';
+  document.getElementById('weather-detail').textContent = 'ip-api.com / ipapi.co 均不可用，请使用下方城市搜索或 GPS 定位。';
 }
 
 // Method 2: Browser Geolocation (GPS/WiFi — better on mobile)
